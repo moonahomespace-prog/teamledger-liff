@@ -27,11 +27,30 @@ window.TLPages.sell = async function (container) {
   var invoicesHistory = [];
   var lastIssued = null;
 
-  await TLProductsCache.sync(false).catch(function () {});
-  try {
-    var cr = await TLApi.call('getCustomers', {});
-    customers = cr.customers || [];
-  } catch (e) {}
+  await TLProductsCache.loadLocal().catch(function () {});
+  setTimeout(function () {
+    TLProductsCache.sync(false).then(function (r) {
+      var el = document.getElementById('sell-prod-count');
+      if (el) el.textContent = TLProductsCache.getAll().length.toLocaleString();
+    }).catch(function () {});
+    TLApi.call('getCustomers', {}).then(function (cr) {
+      customers = cr.customers || [];
+      var slot = document.getElementById('sell-cust-picker');
+      if (slot && customers.length && !document.getElementById('pick-customer')) {
+        slot.innerHTML = '<label class="f">เลือกลูกค้าประจำ</label><select id="pick-customer"><option value="">— พิมพ์เอง / ลูกค้าใหม่ —</option>' +
+          customers.map(function (cu) { return '<option value="' + esc(cu.code) + '">' + esc(cu.name) + ' (' + esc(cu.code) + ')</option>'; }).join('') +
+          '</select>';
+        var sel = document.getElementById('pick-customer');
+        if (sel) sel.onchange = function () {
+          var cu = customers.find(function (x) { return x.code === sel.value; });
+          if (cu) {
+            S.customer = { code: cu.code, name: cu.name, taxId: cu.taxId, branch: cu.branch, address: cu.address, phone: cu.phone };
+            render();
+          }
+        };
+      }
+    }).catch(function () {});
+  }, 0);
 
   function addOrIncrementProduct(p) {
     // [sku, barcode, name, unit, price, category, vatType]
@@ -284,7 +303,7 @@ window.TLPages.sell = async function (container) {
       '</div>' +
 
       '<div class="card">' +
-        '<h3>2. เลือกสินค้า (' + TLProductsCache.getAll().length.toLocaleString() + ' รายการในเครื่อง)</h3>' +
+        '<h3>2. เลือกสินค้า (<span id="sell-prod-count">' + TLProductsCache.getAll().length.toLocaleString() + '</span> รายการในเครื่อง)</h3>' +
         '<div style="display:flex;gap:8px">' +
           '<input type="text" id="prod-search-q" placeholder="พิมพ์ชื่อ, SKU หรือบาร์โค้ด...">' +
           '<button type="button" class="btn pri" id="btn-scan-barcode">📷 สแกน</button>' +
@@ -315,11 +334,11 @@ window.TLPages.sell = async function (container) {
       '<div class="card">' +
         '<h3>4. ลูกค้า & การชำระเงิน</h3>' +
         '<label><input type="checkbox" data-sk-chk="showCustomer"' + (S.showCustomer ? ' checked' : '') + '> แสดงกล่องข้อมูลลูกค้าบนบิล</label>' +
-        (customers.length
+        '<div id="sell-cust-picker">' + (customers.length
           ? '<label class="f">เลือกลูกค้าประจำ</label><select id="pick-customer"><option value="">— พิมพ์เอง / ลูกค้าใหม่ —</option>' +
             customers.map(function (cu) { return '<option value="' + esc(cu.code) + '">' + esc(cu.name) + ' (' + esc(cu.code) + ')</option>'; }).join('') +
             '</select>'
-          : '') +
+          : '') + '</div>' +
         '<div class="grid2">' +
           '<div><label class="f">ชื่อลูกค้า / บริษัท</label><input type="text" data-sk="customer.name" value="' + esc(S.customer.name) + '"></div>' +
           '<div><label class="f">โทร</label><input type="text" data-sk="customer.phone" value="' + esc(S.customer.phone) + '"></div>' +

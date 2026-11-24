@@ -79,8 +79,12 @@ window.TLPages.pending = async function (container) {
           '<div class="ok-box">ยอดโอนรวม: <b>' + TLUtils.moneyBaht(sel.total) + ' บาท</b></div>' +
           '<label class="f">วันที่โอนจริง</label>' +
           '<input type="date" id="pay-date" value="' + esc(payDate) + '">' +
-          '<label class="f">แนบสลิปโอนเงิน (1 สลิปสำหรับรอบนี้)</label>' +
-          '<input type="file" id="pay-slip" accept="image/*">' +
+          '<label class="upload-zone sky" style="margin-top:10px">' +
+            '<span class="uz-ico">🧾</span>' +
+            '<span class="uz-title">แนบสลิปโอนเงิน (1 สลิปรอบนี้)</span>' +
+            '<span class="uz-sub">' + (slipImage ? 'แนบสลิปแล้ว ✓ (แตะเพื่อเปลี่ยน)' : 'แตะเพื่ออัปโหลดสลิปธนาคาร') + '</span>' +
+            '<input type="file" id="pay-slip" accept="image/*">' +
+          '</label>' +
           (slipImage ? '<div class="thumbs"><div class="thumb-item"><img src="' + slipImage + '"></div></div>' : '') +
           '<div class="btns" style="margin-top:12px">' +
             '<button type="button" class="btn pri full" id="btn-confirm-batch">✅ ยืนยันโอนแล้ว & แจ้งลูกทีม</button>' +

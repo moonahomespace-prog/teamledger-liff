@@ -1,16 +1,21 @@
-// TeamLedger v3.1 — บันทึกรายจ่าย + แนบหลายรูป (Shopee/Lazada + สลิป) + แตกยอดหลายรายการใน 1 สลิป (Split Expense)
+// TeamLedger v3.1 — บันทึกรายจ่ายมินิมอล + แนบหลายรูป + แตกยอด 1 สลิปหลายรายการ (Split Expense)
 window.TLPages = window.TLPages || {};
 
 window.TLPages.expense = async function (container, params) {
   var esc = TLUtils.esc;
   var draftId = (params && params.draftId) || '';
   var cats = TLApi.state.categories.filter(function (c) { return c.type === 'จ่าย'; });
-  if (!cats.length) cats = [{ category: 'วัตถุดิบ / สินค้าเพื่อขาย' }, { category: 'ค่าขนส่ง / พัสดุ' }, { category: 'ค่าใช้จ่ายเบ็ดเตล็ด' }];
+  if (!cats.length) cats = [
+    { category: 'วัตถุดิบ / สินค้าเพื่อขาย' },
+    { category: 'ค่าขนส่ง / พัสดุ' },
+    { category: 'วัสดุอุปกรณ์ / แพ็กเกจจิ้ง' },
+    { category: 'ค่าใช้จ่ายเบ็ดเตล็ด' }
+  ];
 
   var state = {
     draftTxnId: draftId,
     existingBillImageId: '',
-    billImages: [], // compressed JPEG dataURLs
+    billImages: [],
     slipImage: '',
     billDate: TLUtils.todayISO(),
     payeeMode: 'SELF',
@@ -22,18 +27,6 @@ window.TLPages.expense = async function (container, params) {
   };
 
   var drafts = [];
-  try {
-    var dr = await TLApi.call('getDrafts', {});
-    drafts = dr.drafts || [];
-  } catch (e) {}
-
-  if (draftId) {
-    var matched = drafts.find(function (d) { return d.txnId === draftId; });
-    if (matched) {
-      state.billDate = matched.billDate || state.billDate;
-      state.existingBillImageId = (matched.billImageIds || []).join(',');
-    }
-  }
 
   function calcSummary() {
     var sumSt = 0, vatSt = 0;
@@ -52,44 +45,49 @@ window.TLPages.expense = async function (container, params) {
     return { sumSt: sumSt, vatSt: vatSt };
   }
 
-  function render() {
-    var draftBanner = '';
-    if (drafts.length) {
-      draftBanner = '<div class="card"><h3>📷 ร่างจากรูปที่ส่งในแชต (' + drafts.length + ' รายการ)</h3>' +
-        '<div class="btns">' +
+  function buildDraftBannerHtml() {
+    if (!drafts.length) return '';
+    return '<div class="card">' +
+      '<h3>📷 ร่างจากรูปที่ส่งในแชต (' + drafts.length + ')</h3>' +
+      '<div class="btns">' +
         drafts.map(function (d) {
           var active = state.draftTxnId === d.txnId;
           return '<button type="button" class="btn sm ' + (active ? 'pri' : 'outline') + '" data-pick-draft="' + esc(d.txnId) + '">' +
-            esc(d.txnId) + ' (' + TLUtils.thaiDate(d.billDate) + ')</button>';
+            esc(d.txnId) + ' · ' + TLUtils.thaiDate(d.billDate) + '</button>';
         }).join('') +
-        (state.draftTxnId ? '<button type="button" class="btn sm" id="btn-clear-draft">ยกเลิกร่าง</button>' : '') +
-        '</div>' +
-        (state.existingBillImageId
-          ? '<div class="btns">' + state.existingBillImageId.split(',').filter(Boolean).map(function (fid, idx) {
-              return '<button type="button" class="btn sm outline" data-view-img="' + esc(fid) + '">🖼️ ดูรูปร่าง #' + (idx + 1) + '</button>';
-            }).join('') + '</div>'
-          : '') +
-        '</div>';
-    }
+        (state.draftTxnId ? '<button type="button" class="btn sm" id="btn-clear-draft">ไม่ใช้ร่าง</button>' : '') +
+      '</div>' +
+      (state.existingBillImageId
+        ? '<div class="btns">' + state.existingBillImageId.split(',').filter(Boolean).map(function (fid, idx) {
+            return '<button type="button" class="btn sm outline" data-view-img="' + esc(fid) + '">🖼️ ดูรูปร่าง #' + (idx + 1) + '</button>';
+          }).join('') + '</div>'
+        : '') +
+    '</div>';
+  }
 
+  function render() {
+    var isSplit = state.splits.length > 1;
     var splitHtml = state.splits.map(function (sp, idx) {
-      var catOpts = cats.map(function (c) {
-        return '<option value="' + esc(c.category) + '"' + (c.category === sp.category ? ' selected' : '') + '>' + esc(c.category) + '</option>';
-      }).join('');
+      var chipsHtml = '<div class="chip-group">' + cats.map(function (c) {
+        var act = c.category === sp.category;
+        return '<button type="button" class="chip' + (act ? ' active' : '') + '" data-sp-cat="' + idx + '" data-val="' + esc(c.category) + '">' + esc(c.category) + '</button>';
+      }).join('') + '</div>';
+
       return '<div class="split-card" data-sp="' + idx + '">' +
-        '<div class="split-head"><strong>รายการที่ ' + (idx + 1) + '</strong>' +
-        (state.splits.length > 1 ? '<button type="button" class="btn sm danger" data-del-sp="' + idx + '">ลบแถว</button>' : '') +
-        '</div>' +
+        (isSplit
+          ? '<div class="split-head"><strong>รายการที่ ' + (idx + 1) + '</strong>' +
+              '<button type="button" class="btn sm danger" data-del-sp="' + idx + '">ลบ</button></div>'
+          : '') +
+        '<label class="f">' + (isSplit ? 'จำนวนเงิน (บาท)' : 'ยอดเงินทั้งหมด (บาท)') + '</label>' +
+        '<input type="number" step="0.01" inputmode="decimal" class="' + (isSplit ? '' : 'amount-hero') + '" data-sf="amount" value="' + esc(sp.amount) + '" placeholder="0.00">' +
+        '<label class="f">เลือกหมวดหมู่</label>' +
+        chipsHtml +
         '<div class="grid2">' +
-          '<div><label class="f">หมวดหมู่</label><select data-sf="category">' + catOpts + '</select></div>' +
-          '<div><label class="f">จำนวนเงิน (บาท)</label><input type="number" step="0.01" inputmode="decimal" data-sf="amount" value="' + esc(sp.amount) + '" placeholder="0.00"></div>' +
-        '</div>' +
-        '<div class="grid2">' +
-          '<div><label class="f">รายละเอียดสินค้า/บิล</label><input type="text" data-sf="description" value="' + esc(sp.description) + '" placeholder="เช่น แพ็กเกจจิ้ง / Shopee"></div>' +
+          '<div><label class="f">รายละเอียดสั้นๆ</label><input type="text" data-sf="description" value="' + esc(sp.description) + '" placeholder="เช่น ค่าของ / Shopee"></div>' +
           '<div><label class="f">ภาษีซื้อ (VAT)</label><select data-sf="vatMode">' +
-            '<option value="NONE"' + (sp.vatMode === 'NONE' ? ' selected' : '') + '>ไม่มี VAT (บิลเงินสด/Shopee)</option>' +
-            '<option value="INCL"' + (sp.vatMode === 'INCL' ? ' selected' : '') + '>รวม VAT 7% แล้ว</option>' +
-            '<option value="EXCL"' + (sp.vatMode === 'EXCL' ? ' selected' : '') + '>ยังไม่รวม VAT (+7%)</option>' +
+            '<option value="NONE"' + (sp.vatMode === 'NONE' ? ' selected' : '') + '>ไม่มี VAT</option>' +
+            '<option value="INCL"' + (sp.vatMode === 'INCL' ? ' selected' : '') + '>รวม VAT 7%</option>' +
+            '<option value="EXCL"' + (sp.vatMode === 'EXCL' ? ' selected' : '') + '>ยังไม่รวม VAT</option>' +
           '</select></div>' +
         '</div>' +
       '</div>';
@@ -101,55 +99,71 @@ window.TLPages.expense = async function (container, params) {
     if (slipSt > 0) {
       var diff = slipSt - sum.sumSt;
       compareMsg = diff === 0
-        ? '<div class="ok-box">✓ ยอดรวมทุกรายการตรงกับยอดสลิป (' + TLUtils.money(sum.sumSt) + ' บาท)</div>'
-        : '<div class="warn-box">⚠️ ยอดรวม (' + TLUtils.money(sum.sumSt) + ') ต่างจากยอดสลิป (' + TLUtils.money(slipSt) + ') อยู่ ' + TLUtils.money(Math.abs(diff)) + ' บาท</div>';
+        ? '<div class="ok-box">✓ ยอดรวมตรงกับสลิป (' + TLUtils.money(sum.sumSt) + ' บ.)</div>'
+        : '<div class="warn-box">⚠️ ยอดรวม (' + TLUtils.money(sum.sumSt) + ') ต่างจากสลิป (' + TLUtils.money(slipSt) + ') อยู่ ' + TLUtils.money(Math.abs(diff)) + ' บ.</div>';
     }
 
-    container.innerHTML = draftBanner +
+    container.innerHTML =
+      '<div id="exp-drafts-slot">' + buildDraftBannerHtml() + '</div>' +
       '<div class="card">' +
-        '<h2>💸 บันทึกรายจ่าย' + (state.splits.length > 1 ? ' <span class="badge ok">แตกยอด ' + state.splits.length + ' รายการ</span>' : '') + '</h2>' +
-        '<div class="grid2">' +
-          '<div><label class="f">วันที่ในบิล (ย้อนหลังได้)</label><input type="date" id="exp-date" value="' + esc(state.billDate) + '"></div>' +
-          '<div><label class="f">ผู้รับเงิน / การจ่าย</label><select id="exp-payee-mode">' +
-            '<option value="SELF"' + (state.payeeMode === 'SELF' ? ' selected' : '') + '>ฉันสำรองจ่าย (รอหัวหน้าโอนคืน)</option>' +
-            '<option value="VENDOR"' + (state.payeeMode === 'VENDOR' ? ' selected' : '') + '>โอนให้ร้านค้าโดยตรง (รอโอน)</option>' +
-            '<option value="OWNER_PAID"' + (state.payeeMode === 'OWNER_PAID' ? ' selected' : '') + '>หัวหน้าจ่ายแล้ว / เงินสดร้าน</option>' +
-          '</select></div>' +
+        '<h2>🌸 บันทึกรายจ่าย' + (isSplit ? ' <span class="badge ok">แตกยอด ' + state.splits.length + ' รายการ</span>' : '') + '</h2>' +
+
+        '<label class="f">ผู้รับเงิน / การจ่าย</label>' +
+        '<div class="seg" id="exp-payee-seg">' +
+          '<button type="button" class="' + (state.payeeMode === 'SELF' ? 'active' : '') + '" data-pmode="SELF">ฉันสำรองจ่าย</button>' +
+          '<button type="button" class="' + (state.payeeMode === 'VENDOR' ? 'active' : '') + '" data-pmode="VENDOR">โอนร้านค้า</button>' +
+          '<button type="button" class="' + (state.payeeMode === 'OWNER_PAID' ? 'active' : '') + '" data-pmode="OWNER_PAID">จ่ายแล้ว</button>' +
         '</div>' +
         (state.payeeMode !== 'SELF'
-          ? '<label class="f">ชื่อร้านค้า / ผู้รับเงิน</label><input type="text" id="exp-payee-name" value="' + esc(state.payeeName) + '" placeholder="เช่น ร้านวัสดุ / Shopee">'
+          ? '<input type="text" id="exp-payee-name" value="' + esc(state.payeeName) + '" placeholder="ชื่อร้านค้า / ผู้รับเงิน (เช่น Shopee / ร้านวัสดุ)" style="margin-bottom:8px">'
           : '') +
 
-        '<label class="f">📸 รูปบิล / รูปแคปหน้าจอคำสั่งซื้อ (Shopee/Lazada) — แนบได้หลายรูป</label>' +
-        '<input type="file" id="exp-bill-files" accept="image/*" multiple>' +
-        '<div class="thumbs" id="exp-bill-thumbs">' +
-          state.billImages.map(function (src, i) {
-            return '<div class="thumb-item"><img src="' + src + '"><button type="button" class="thumb-del" data-del-bill="' + i + '">✕</button></div>';
-          }).join('') +
+        '<div id="exp-splits">' + splitHtml + '</div>' +
+        '<button type="button" class="btn outline full" id="btn-add-split" style="margin-bottom:10px">+ แตกยอดเพิ่ม (1 สลิปหลายรายการ)</button>' +
+
+        '<div class="grid2">' +
+          '<div>' +
+            '<label class="upload-zone">' +
+              '<span class="uz-ico">🧾</span>' +
+              '<span class="uz-title">แนบรูปบิล / แคปจอ</span>' +
+              '<span class="uz-sub">' + (state.billImages.length ? 'เลือกแล้ว ' + state.billImages.length + ' รูป (แตะเพิ่มได้)' : 'ถ่ายรูป หรือเลือกรูปหลายใบ') + '</span>' +
+              '<input type="file" id="exp-bill-files" accept="image/*" multiple>' +
+            '</label>' +
+          '</div>' +
+          '<div>' +
+            '<label class="upload-zone sky">' +
+              '<span class="uz-ico">💸</span>' +
+              '<span class="uz-title">แนบสลิปโอนเงิน</span>' +
+              '<span class="uz-sub">' + (state.slipImage ? 'แนบสลิปแล้ว ✓ (แตะเปลี่ยน)' : 'อัปโหลด 1 สลิป (ถ้ามี)') + '</span>' +
+              '<input type="file" id="exp-slip-file" accept="image/*">' +
+            '</label>' +
+          '</div>' +
         '</div>' +
 
-        '<label class="f">🧾 รูปสลิปโอนเงิน (ถ้ามี 1 สลิปรวม)</label>' +
-        '<input type="file" id="exp-slip-file" accept="image/*">' +
-        (state.slipImage
-          ? '<div class="thumbs"><div class="thumb-item"><img src="' + state.slipImage + '"><button type="button" class="thumb-del" id="del-slip">✕</button></div></div>'
+        (state.billImages.length || state.slipImage
+          ? '<div class="thumbs">' +
+              state.billImages.map(function (src, i) {
+                return '<div class="thumb-item"><img src="' + src + '"><button type="button" class="thumb-del" data-del-bill="' + i + '">✕</button></div>';
+              }).join('') +
+              (state.slipImage ? '<div class="thumb-item" style="border-color:var(--sky)"><img src="' + state.slipImage + '"><button type="button" class="thumb-del" id="del-slip">✕</button></div>' : '') +
+            '</div>'
           : '') +
 
-        '<div style="margin-top:14px">' +
-          '<h3>📋 รายการค่าใช้จ่าย</h3>' +
-          '<p class="hint">1 บิล/คำสั่งซื้อ สามารถแตกยอดหลายหมวดหมู่โดยใช้รูปหลักฐานและสลิปชุดเดียวกันได้</p>' +
-          '<div id="exp-splits">' + splitHtml + '</div>' +
-          '<button type="button" class="btn outline full" id="btn-add-split">+ แตกยอดเพิ่ม (1 สลิปหลายรายการ)</button>' +
-        '</div>' +
+        '<details class="opt-box"' + (isSplit || state.slipCompareTotal ? ' open' : '') + '>' +
+          '<summary>⚙️ วันที่บิลย้อนหลัง & เทียบยอดสลิป (' + TLUtils.thaiDate(state.billDate) + ')</summary>' +
+          '<label class="f">วันที่ในบิล</label>' +
+          '<input type="date" id="exp-date" value="' + esc(state.billDate) + '">' +
+          '<label class="f">ยอดรวมตามสลิป (ใช้เช็กตรงตอนแตกยอด)</label>' +
+          '<input type="number" step="0.01" inputmode="decimal" id="exp-slip-compare" value="' + esc(state.slipCompareTotal) + '" placeholder="เช่น 1000.00">' +
+        '</details>' +
 
-        '<label class="f">ยอดรวมตามสลิป (ไม่บังคับ — ใช้เทียบยอดแตก)</label>' +
-        '<input type="number" step="0.01" inputmode="decimal" id="exp-slip-compare" value="' + esc(state.slipCompareTotal) + '" placeholder="ใส่ยอดโอนในสลิปเพื่อเช็กตรง">' +
-        '<div id="exp-summary-box" style="margin-top:10px">' +
-          '<div class="ok-box">รวมทั้งหมด: <b>' + TLUtils.money(sum.sumSt) + '</b> บาท · VAT ซื้อ: <b>' + TLUtils.money(sum.vatSt) + '</b> บาท</div>' +
+        '<div id="exp-summary-box">' +
+          (sum.sumSt > 0 ? '<div class="ok-box">รวมทั้งหมด <b>' + TLUtils.money(sum.sumSt) + '</b> บาท' + (sum.vatSt > 0 ? ' · VAT ซื้อ ' + TLUtils.money(sum.vatSt) + ' บ.' : '') + '</div>' : '') +
           compareMsg +
         '</div>' +
 
-        '<div class="btns" style="margin-top:14px">' +
-          '<button type="button" class="btn pri full" id="btn-save-expense">💾 บันทึกรายจ่าย</button>' +
+        '<div class="btns" style="margin-top:12px">' +
+          '<button type="button" class="btn pri full" id="btn-save-expense">✨ บันทึกรายจ่าย</button>' +
         '</div>' +
       '</div>';
 
@@ -163,16 +177,16 @@ window.TLPages.expense = async function (container, params) {
     if (slipSt > 0) {
       var diff = slipSt - sum.sumSt;
       compareMsg = diff === 0
-        ? '<div class="ok-box">✓ ยอดรวมทุกรายการตรงกับยอดสลิป (' + TLUtils.money(sum.sumSt) + ' บาท)</div>'
-        : '<div class="warn-box">⚠️ ยอดรวม (' + TLUtils.money(sum.sumSt) + ') ต่างจากยอดสลิป (' + TLUtils.money(slipSt) + ') อยู่ ' + TLUtils.money(Math.abs(diff)) + ' บาท</div>';
+        ? '<div class="ok-box">✓ ยอดรวมตรงกับสลิป (' + TLUtils.money(sum.sumSt) + ' บ.)</div>'
+        : '<div class="warn-box">⚠️ ยอดรวม (' + TLUtils.money(sum.sumSt) + ') ต่างจากสลิป (' + TLUtils.money(slipSt) + ') อยู่ ' + TLUtils.money(Math.abs(diff)) + ' บ.</div>';
     }
     var box = document.getElementById('exp-summary-box');
     if (box) {
-      box.innerHTML = '<div class="ok-box">รวมทั้งหมด: <b>' + TLUtils.money(sum.sumSt) + '</b> บาท · VAT ซื้อ: <b>' + TLUtils.money(sum.vatSt) + '</b> บาท</div>' + compareMsg;
+      box.innerHTML = (sum.sumSt > 0 ? '<div class="ok-box">รวมทั้งหมด <b>' + TLUtils.money(sum.sumSt) + '</b> บาท' + (sum.vatSt > 0 ? ' · VAT ซื้อ ' + TLUtils.money(sum.vatSt) + ' บ.' : '') + '</div>' : '') + compareMsg;
     }
   }
 
-  function bindEvents() {
+  function bindDraftEvents() {
     container.querySelectorAll('[data-pick-draft]').forEach(function (b) {
       b.onclick = function () {
         var did = b.dataset.pickDraft;
@@ -188,9 +202,15 @@ window.TLPages.expense = async function (container, params) {
     container.querySelectorAll('[data-view-img]').forEach(function (b) {
       b.onclick = function () { TLApi.viewPrivateImage(b.dataset.viewImg, 'รูปร่างจากแชต'); };
     });
+  }
+
+  function bindEvents() {
+    bindDraftEvents();
 
     document.getElementById('exp-date').onchange = function () { state.billDate = this.value; };
-    document.getElementById('exp-payee-mode').onchange = function () { state.payeeMode = this.value; render(); };
+    container.querySelectorAll('[data-pmode]').forEach(function (b) {
+      b.onclick = function () { state.payeeMode = b.dataset.pmode; render(); };
+    });
     var pNameEl = document.getElementById('exp-payee-name');
     if (pNameEl) pNameEl.oninput = function () { state.payeeName = this.value; };
 
@@ -219,6 +239,16 @@ window.TLPages.expense = async function (container, params) {
     };
     var delSlip = document.getElementById('del-slip');
     if (delSlip) delSlip.onclick = function () { state.slipImage = ''; render(); };
+
+    container.querySelectorAll('[data-sp-cat]').forEach(function (b) {
+      b.onclick = function () {
+        var idx = Number(b.dataset.spCat);
+        state.splits[idx].category = b.dataset.val;
+        var card = b.closest('.split-card');
+        card.querySelectorAll('[data-sp-cat]').forEach(function (c) { c.classList.remove('active'); });
+        b.classList.add('active');
+      };
+    });
 
     container.querySelectorAll('.split-card').forEach(function (card) {
       var idx = Number(card.dataset.sp);
@@ -285,16 +315,42 @@ window.TLPages.expense = async function (container, params) {
         state.slipImage = '';
         state.slipCompareTotal = '';
         state.splits = [{ category: cats[0].category, description: '', amount: '', vatMode: 'NONE' }];
-        var dr2 = await TLApi.call('getDrafts', {});
-        drafts = dr2.drafts || [];
         render();
+        TLApi.call('getDrafts', {}).then(function (dr2) {
+          drafts = dr2.drafts || [];
+          var slot = document.getElementById('exp-drafts-slot');
+          if (slot) { slot.innerHTML = buildDraftBannerHtml(); bindDraftEvents(); }
+        }).catch(function () {});
       } catch (e) {
         TLUtils.showToast(e.message, 'err');
         btn.disabled = false;
-        btn.textContent = '💾 บันทึกรายจ่าย';
+        btn.textContent = '✨ บันทึกรายจ่าย';
       }
     };
   }
 
-  render();
+  // ถ้าเปิดจากปุ่มร่างในแชต ให้โหลดร่างก่อน; ถ้าเปิดหน้าจ่ายปกติ แสดงฟอร์มทันทีแล้วโหลดร่างเบื้องหลัง
+  if (draftId) {
+    try {
+      var dr = await TLApi.call('getDrafts', {});
+      drafts = dr.drafts || [];
+      var matched = drafts.find(function (d) { return d.txnId === draftId; });
+      if (matched) {
+        state.billDate = matched.billDate || state.billDate;
+        state.existingBillImageId = (matched.billImageIds || []).join(',');
+      }
+    } catch (e) {}
+    render();
+  } else {
+    render();
+    TLApi.call('getDrafts', {}).then(function (dr) {
+      drafts = dr.drafts || [];
+      if (!drafts.length) return;
+      var slot = document.getElementById('exp-drafts-slot');
+      if (slot) {
+        slot.innerHTML = buildDraftBannerHtml();
+        bindDraftEvents();
+      }
+    }).catch(function () {});
+  }
 };

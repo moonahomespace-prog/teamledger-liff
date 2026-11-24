@@ -1,8 +1,9 @@
-// TeamLedger v3.1 — LIFF Boot & ?page= Router
+// TeamLedger v3.1 — LIFF Boot & Instant Stale-While-Revalidate Cache + ?page= Router
 (function () {
   var qs = new URLSearchParams(location.search);
   var requestedPage = qs.get('page') || 'expense';
   var draftId = qs.get('id') || '';
+  var BOOT_CACHE_KEY = 'tl_boot_cache_v1';
 
   var PAGE_META = {
     expense:   { title: 'จ่าย', ico: '💸', ownerOnly: false },
@@ -17,6 +18,47 @@
     team:      { title: 'ทีมงาน', ico: '👨‍👩‍👧‍👦', ownerOnly: true }
   };
 
+  function getSubFromToken(idToken) {
+    try {
+      var decoded = window.liff && liff.getDecodedIDToken ? liff.getDecodedIDToken() : null;
+      if (decoded && decoded.sub) return String(decoded.sub);
+      var part = String(idToken || '').split('.')[1];
+      if (!part) return '';
+      var json = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+      return String(json.sub || '');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function loadBootCache(sub) {
+    try {
+      var raw = JSON.parse(localStorage.getItem(BOOT_CACHE_KEY) || 'null');
+      if (!raw || !raw.user || raw.sub !== sub) return null;
+      // อายุแคชสูงสุด 24 ชม. สำหรับ UI แสดงผลด่วน (ยังไงเบื้องหลังตรวจสิทธิ์จริงทุกครั้ง)
+      if (Date.now() - (raw.ts || 0) > 86400000) return null;
+      return raw;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveBootCache(sub, user, categories, invoiceSettings) {
+    try {
+      localStorage.setItem(BOOT_CACHE_KEY, JSON.stringify({
+        sub: sub,
+        ts: Date.now(),
+        user: user,
+        categories: categories,
+        invoiceSettings: invoiceSettings
+      }));
+    } catch (e) {}
+  }
+
+  function clearBootCache() {
+    try { localStorage.removeItem(BOOT_CACHE_KEY); } catch (e) {}
+  }
+
   function navigate(page, extraParams) {
     if (page === 'draft') {
       page = 'expense';
@@ -28,7 +70,6 @@
     }
     TLApi.state.currentPage = page;
 
-    // อัปเดตสถานะแถบล่าง
     document.querySelectorAll('.nav-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.nav === page);
     });
@@ -99,29 +140,52 @@
         throw new Error('ไม่พบ ID Token จาก LINE (ตรวจสอบว่าเปิด Scopes: profile และ openid ในการตั้งค่า LIFF แล้ว)');
       }
 
-      var sessRes = await TLApi.call('getSession', {});
-      var sess = sessRes.session;
+      var sub = getSubFromToken(TLApi.state.idToken);
+      var cached = sub ? loadBootCache(sub) : null;
+
+      // เปิดหน้าจอทันทีจากแคช (ลดเวลารอเปิดเมนูจาก Rich Menu เหลือ < 0.3 วินาที)
+      if (cached) {
+        TLApi.state.user = cached.user;
+        TLApi.state.categories = cached.categories || [];
+        TLApi.state.invoiceSettings = cached.invoiceSettings || TLInvoiceCore.defaults();
+        document.getElementById('user-badge').textContent = cached.user.name + ' · ' + cached.user.role;
+        renderNav(cached.user);
+        navigate(requestedPage, requestedPage === 'draft' ? { draftId: draftId } : {});
+      }
+
+      // ยืนยันสิทธิ์ + อัปเดตข้อมูลล่าสุดพร้อมกันเบื้องหลัง (1 รอบ Parallel)
+      var results = await Promise.all([
+        TLApi.call('getSession', {}),
+        TLApi.call('getCategories', {}).catch(function () { return null; }),
+        TLApi.call('getInvoiceSettings', {}).catch(function () { return null; })
+      ]);
+
+      var sess = results[0].session;
       TLApi.state.session = sess;
 
       if (sess.status !== 'ACTIVE') {
+        clearBootCache();
+        document.getElementById('bottom-nav').hidden = true;
         document.getElementById('user-badge').textContent = 'ยังไม่ได้เข้าสู่ระบบทีม';
         window.TLPages.register(appView, sess);
         return;
       }
 
+      var newCats = (results[1] && results[1].categories) || TLApi.state.categories || [];
+      var newInv = (results[2] && results[2].settings) || TLApi.state.invoiceSettings || TLInvoiceCore.defaults();
+      var roleChanged = !cached || cached.user.role !== sess.user.role || cached.user.canIssueInvoice !== sess.user.canIssueInvoice;
+
       TLApi.state.user = sess.user;
-      document.getElementById('user-badge').textContent = sess.user.name + ' (' + sess.user.role + ')';
+      TLApi.state.categories = newCats;
+      TLApi.state.invoiceSettings = newInv;
+      if (sub) saveBootCache(sub, sess.user, newCats, newInv);
 
-      // โหลดหมวดหมู่และค่าตั้งต้นฟอร์มบิลแบบขนาน
-      var initData = await Promise.all([
-        TLApi.call('getCategories', {}).catch(function () { return { categories: [] }; }),
-        TLApi.call('getInvoiceSettings', {}).catch(function () { return { settings: TLInvoiceCore.defaults() }; })
-      ]);
-      TLApi.state.categories = initData[0].categories || [];
-      TLApi.state.invoiceSettings = initData[1].settings || TLInvoiceCore.defaults();
+      document.getElementById('user-badge').textContent = sess.user.name + ' · ' + sess.user.role;
 
-      renderNav(sess.user);
-      navigate(requestedPage, requestedPage === 'draft' ? { draftId: draftId } : {});
+      if (!cached || roleChanged) {
+        renderNav(sess.user);
+        navigate(requestedPage, requestedPage === 'draft' ? { draftId: draftId } : {});
+      }
     } catch (err) {
       document.getElementById('user-badge').textContent = 'เกิดข้อผิดพลาด';
       appView.innerHTML =
