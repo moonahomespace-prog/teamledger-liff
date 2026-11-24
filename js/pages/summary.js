@@ -9,16 +9,37 @@ window.TLPages.summary = async function (container) {
   var sumData = null;
   var vatData = null;
 
-  async function loadData() {
-    container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังคำนวณสรุปรายงาน...</p></div>';
-    try {
-      sumData = await TLApi.call('getSummaryReport', { month: month, dateMode: dateMode });
-      if (isOwner) {
-        vatData = await TLApi.call('getVatReport', { month: month });
-      }
+  async function loadData(forceSpinner) {
+    var sumKey = 'summary:' + month + ':' + dateMode;
+    var vatKey = 'vat:' + month;
+    var cachedSum = TLApi.getCache(sumKey);
+    var cachedVat = isOwner ? TLApi.getCache(vatKey) : true;
+    if (cachedSum && (!isOwner || cachedVat) && !forceSpinner) {
+      sumData = cachedSum;
+      if (isOwner) vatData = cachedVat;
       render();
+    } else {
+      container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังคำนวณสรุปรายงาน...</p></div>';
+    }
+
+    try {
+      var calls = [TLApi.call('getSummaryReport', { month: month, dateMode: dateMode })];
+      if (isOwner) calls.push(TLApi.call('getVatReport', { month: month }));
+      var res = await Promise.all(calls);
+      var freshSum = res[0];
+      var freshVat = isOwner ? res[1] : null;
+      TLApi.setCache(sumKey, freshSum);
+      if (isOwner && freshVat) TLApi.setCache(vatKey, freshVat);
+      var changed = !cachedSum || JSON.stringify(freshSum) !== JSON.stringify(sumData) || (isOwner && JSON.stringify(freshVat) !== JSON.stringify(vatData));
+      sumData = freshSum;
+      if (isOwner) vatData = freshVat;
+      if (TLApi.state.currentPage === 'summary' && (forceSpinner || !cachedSum || changed)) {
+        render();
+      }
     } catch (e) {
-      container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
+      if (!cachedSum) {
+        container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
+      }
     }
   }
 

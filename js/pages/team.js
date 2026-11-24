@@ -9,14 +9,25 @@ window.TLPages.team = async function (container) {
   }
 
   var users = [];
-  async function loadData() {
-    container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังโหลดรายชื่อทีม...</p></div>';
+  async function loadData(forceSpinner) {
+    var cached = TLApi.getCache('team');
+    if (cached && !forceSpinner) {
+      users = cached;
+      render();
+    } else {
+      container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังโหลดรายชื่อทีม...</p></div>';
+    }
     try {
       var res = await TLApi.call('listUsers', {});
-      users = res.users || [];
-      render();
+      var fresh = res.users || [];
+      TLApi.setCache('team', fresh);
+      var changed = !cached || JSON.stringify(fresh) !== JSON.stringify(users);
+      users = fresh;
+      if (TLApi.state.currentPage === 'team' && (forceSpinner || !cached || changed)) {
+        render();
+      }
     } catch (e) {
-      container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
+      if (!cached) container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
     }
   }
 

@@ -5,14 +5,27 @@ window.TLPages.customers = async function (container) {
   var esc = TLUtils.esc;
   var customers = [];
 
-  async function loadData() {
-    container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังโหลดรายชื่อลูกค้า...</p></div>';
+  async function loadData(forceSpinner) {
+    var cached = TLApi.getCache('customers');
+    if (cached && !forceSpinner) {
+      customers = cached;
+      render();
+    } else {
+      container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังโหลดรายชื่อลูกค้า...</p></div>';
+    }
     try {
       var res = await TLApi.call('getCustomers', {});
-      customers = res.customers || [];
-      render();
+      var fresh = res.customers || [];
+      TLApi.setCache('customers', fresh);
+      var changed = !cached || JSON.stringify(fresh) !== JSON.stringify(customers);
+      customers = fresh;
+      var activeEl = document.activeElement;
+      var typing = activeEl && container.contains(activeEl) && /^(INPUT|TEXTAREA)$/.test(activeEl.tagName);
+      if (TLApi.state.currentPage === 'customers' && !typing && (forceSpinner || !cached || changed)) {
+        render();
+      }
     } catch (e) {
-      container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
+      if (!cached) container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
     }
   }
 

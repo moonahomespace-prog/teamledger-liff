@@ -1,4 +1,4 @@
-// TeamLedger v3.1 — รอโอน / รอบโอน (OWNER เท่านั้น)
+// TeamLedger v3.1 — รอโอน / รอบโอน (OWNER เท่านั้น) + ยกเลิกรายการทดสอบ/กดผิดได้ทันที
 window.TLPages = window.TLPages || {};
 
 window.TLPages.pending = async function (container) {
@@ -13,13 +13,28 @@ window.TLPages.pending = async function (container) {
   var payDate = TLUtils.todayISO();
   var slipImage = '';
 
-  async function loadData() {
-    container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังโหลดรายการรอโอน...</p></div>';
-    try {
-      data = await TLApi.call('getPendingPayments', {});
+  async function loadData(forceSpinner) {
+    var cached = TLApi.getCache('pending');
+    if (cached && !forceSpinner) {
+      data = cached;
       render();
+    } else {
+      container.innerHTML = '<div class="card center-box"><div class="spinner"></div><p>กำลังโหลดรายการรอโอน...</p></div>';
+    }
+
+    try {
+      var fresh = await TLApi.call('getPendingPayments', {});
+      TLApi.setCache('pending', fresh);
+      var changed = !cached || JSON.stringify(fresh) !== JSON.stringify(data);
+      data = fresh;
+      // อย่าเขียนทับหน้าจอหากผู้ใช้กำลังติ๊กเลือกบิลหรือแนบสลิปอยู่
+      if (TLApi.state.currentPage === 'pending' && (forceSpinner || !cached || (changed && !Object.keys(selectedIds).length && !slipImage))) {
+        render();
+      }
     } catch (e) {
-      container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
+      if (!cached) {
+        container.innerHTML = '<div class="card"><div class="warn-box">' + esc(e.message) + '</div></div>';
+      }
     }
   }
 
@@ -53,6 +68,7 @@ window.TLPages.pending = async function (container) {
                       return '<button type="button" class="btn sm outline" data-img="' + esc(fid) + '">🖼️ บิล #' + (idx + 1) + '</button>';
                     }).join('') +
                     (it.slipImageId ? '<button type="button" class="btn sm outline" data-img="' + esc(it.slipImageId) + '">🧾 สลิป</button>' : '') +
+                    '<button type="button" class="btn sm danger" data-cancel-txn="' + esc(it.txnId) + '">✕ ยกเลิก</button>' +
                   '</div>' +
                 '</div>' +
               '</label>' +
@@ -136,15 +152,28 @@ window.TLPages.pending = async function (container) {
     container.querySelectorAll('[data-img]').forEach(function (b) {
       b.onclick = function () { TLApi.viewPrivateImage(b.dataset.img, 'หลักฐาน / สลิป'); };
     });
+    container.querySelectorAll('[data-cancel-txn]').forEach(function (b) {
+      b.onclick = async function () {
+        var tid = b.dataset.cancelTxn;
+        var reason = await TLUtils.promptCancelReason('ยกเลิกบิลรอโอน ' + tid);
+        if (!reason) return;
+        try {
+          await TLApi.call('cancelTransaction', { txnId: tid, reason: reason });
+          delete selectedIds[tid];
+          TLUtils.showToast('ยกเลิกบิลแล้ว', 'ok');
+          loadData(true);
+        } catch (e) { TLUtils.showToast(e.message, 'err'); }
+      };
+    });
     container.querySelectorAll('[data-cancel-batch]').forEach(function (b) {
       b.onclick = async function () {
         var bid = b.dataset.cancelBatch;
-        var reason = window.prompt('ระบุเหตุผลในการยกเลิกรอบโอน ' + bid + ':');
+        var reason = await TLUtils.promptCancelReason('ยกเลิกรอบโอน ' + bid);
         if (!reason) return;
         try {
           await TLApi.call('cancelPaymentBatch', { batchId: bid, reason: reason });
           TLUtils.showToast('ยกเลิกรอบโอน ' + bid + ' แล้ว (บิลกลับเป็นรอโอน)', 'ok');
-          loadData();
+          loadData(true);
         } catch (e) { TLUtils.showToast(e.message, 'err'); }
       };
     });
@@ -175,7 +204,7 @@ window.TLPages.pending = async function (container) {
           TLUtils.showToast('บันทึกรอบโอน ' + res.batchId + ' สำเร็จ!', 'ok');
           selectedIds = {};
           slipImage = '';
-          loadData();
+          loadData(true);
         } catch (e) {
           TLUtils.showToast(e.message, 'err');
           this.disabled = false;
@@ -185,5 +214,5 @@ window.TLPages.pending = async function (container) {
     }
   }
 
-  loadData();
+  loadData(false);
 };

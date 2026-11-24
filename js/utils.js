@@ -160,6 +160,47 @@ window.TLUtils = (function () {
     }
   }
 
+  function promptCancelReason(title) {
+    return new Promise(function (resolve) {
+      var presets = ['ทดสอบระบบ', 'กรอกยอด/ข้อมูลผิด', 'บันทึกรายการซ้ำ'];
+      var html =
+        '<p class="hint">เลือกเหตุผลด่วน หรือพิมพ์เหตุผลเอง (ระบบจะเก็บประวัติไว้ใน AuditLog โดยไม่ลบแถว)</p>' +
+        '<div class="chip-group">' +
+          presets.map(function (p) {
+            return '<button type="button" class="chip" data-cpreset="' + esc(p) + '">' + esc(p) + '</button>';
+          }).join('') +
+        '</div>' +
+        '<label class="f">เหตุผลการยกเลิก</label>' +
+        '<input type="text" id="cancel-reason-inp" placeholder="ระบุเหตุผล...">' +
+        '<div class="btns" style="margin-top:12px">' +
+          '<button type="button" class="btn" style="flex:1" id="btn-cancel-dismiss">ปิด</button>' +
+          '<button type="button" class="btn danger" style="flex:2" id="btn-cancel-confirm">✕ ยืนยันยกเลิก</button>' +
+        '</div>';
+      showModal(title || 'ยกเลิกรายการ', html);
+      var inp = document.getElementById('cancel-reason-inp');
+      var settled = false;
+      function done(val) {
+        if (settled) return;
+        settled = true;
+        closeModal();
+        resolve(val);
+      }
+      document.querySelectorAll('[data-cpreset]').forEach(function (b) {
+        b.onclick = function () {
+          inp.value = b.dataset.cpreset;
+          document.querySelectorAll('[data-cpreset]').forEach(function (x) { x.classList.remove('active'); });
+          b.classList.add('active');
+        };
+      });
+      document.getElementById('btn-cancel-dismiss').onclick = function () { done(null); };
+      document.getElementById('btn-cancel-confirm').onclick = function () {
+        var v = inp.value.trim();
+        if (!v) return showToast('กรุณาเลือกหรือระบุเหตุผลก่อน', 'err');
+        done(v);
+      };
+    });
+  }
+
   function printPagesHtml(pagesHtml, fontSizePt) {
     var root = document.getElementById('print-root');
     if (!root) {
@@ -183,6 +224,7 @@ window.TLUtils = (function () {
     showToast: showToast,
     showModal: showModal,
     closeModal: closeModal,
+    promptCancelReason: promptCancelReason,
     compressImage: compressImage,
     base64ToBlob: base64ToBlob,
     downloadBase64File: downloadBase64File,

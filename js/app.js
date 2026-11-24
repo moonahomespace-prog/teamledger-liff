@@ -186,6 +186,33 @@
         renderNav(sess.user);
         navigate(requestedPage, requestedPage === 'draft' ? { draftId: draftId } : {});
       }
+
+      // โหลดข้อมูลแท็บหลักล่วงหน้าเบื้องหลัง เพื่อให้กดเปลี่ยนแท็บแล้วขึ้นทันที 0 ms
+      setTimeout(function () {
+        var m = TLUtils.currentMonthKey();
+        if (!TLApi.getCache('mine:' + m + ':')) {
+          TLApi.call('getTransactions', { month: m, type: '', limit: 150 }).then(function (r) {
+            TLApi.setCache('mine:' + m + ':', r.transactions || []);
+          }).catch(function () {});
+        }
+        if (!TLApi.getCache('summary:' + m + ':bill')) {
+          TLApi.call('getSummaryReport', { month: m, dateMode: 'bill' }).then(function (r) {
+            TLApi.setCache('summary:' + m + ':bill', r);
+          }).catch(function () {});
+        }
+        if (sess.user.role === 'OWNER') {
+          if (!TLApi.getCache('pending')) {
+            TLApi.call('getPendingPayments', {}).then(function (r) {
+              TLApi.setCache('pending', r);
+            }).catch(function () {});
+          }
+          if (!TLApi.getCache('vat:' + m)) {
+            TLApi.call('getVatReport', { month: m }).then(function (r) {
+              TLApi.setCache('vat:' + m, r);
+            }).catch(function () {});
+          }
+        }
+      }, 150);
     } catch (err) {
       document.getElementById('user-badge').textContent = 'เกิดข้อผิดพลาด';
       appView.innerHTML =
