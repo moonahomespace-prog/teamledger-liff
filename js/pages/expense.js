@@ -1,4 +1,4 @@
-// TeamLedger v3.1 — บันทึกรายจ่ายมินิมอล + แนบหลายรูป + แตกยอด 1 สลิปหลายรายการ (Split Expense)
+// TeamLedger v3.1 — บันทึกรายจ่ายมินิมอล (ฉันจ่าย / รอจ่าย / จ่ายแล้ว, Filter หมวดหมู่, สินค้า/จำนวน/หน่วย, แตกยอด 1 สลิป)
 window.TLPages = window.TLPages || {};
 
 window.TLPages.expense = async function (container, params) {
@@ -12,6 +12,24 @@ window.TLPages.expense = async function (container, params) {
     { category: 'ค่าใช้จ่ายเบ็ดเตล็ด' }
   ];
 
+  var PAYEE_MODES = {
+    SELF: {
+      label: 'ฉันจ่าย',
+      desc: 'ฉันสำรองจ่ายไปก่อน เจ้านายต้องจ่ายคืน (เข้าหน้ารอโอน)',
+      cls: ''
+    },
+    VENDOR: {
+      label: 'รอจ่าย',
+      desc: 'รอเจ้านายโอนให้ร้านค้าและอัปสลิป (เข้าหน้ารอโอน)',
+      cls: ''
+    },
+    OWNER_PAID: {
+      label: 'จ่ายแล้ว',
+      desc: 'เบิกเงินจ่ายแล้ว รายการนี้สำเร็จเลยไม่ต้องรอเจ้านายโอน',
+      cls: 'sky'
+    }
+  };
+
   var state = {
     draftTxnId: draftId,
     existingBillImageId: '',
@@ -22,7 +40,7 @@ window.TLPages.expense = async function (container, params) {
     payeeName: '',
     slipCompareTotal: '',
     splits: [
-      { category: cats[0].category, description: '', amount: '', vatMode: 'NONE' }
+      { category: cats[0].category, description: '', qty: '1', unit: '', amount: '', vatMode: 'NONE' }
     ]
   };
 
@@ -65,31 +83,51 @@ window.TLPages.expense = async function (container, params) {
     '</div>';
   }
 
+  function renderCatOptionsHtml(selectedCat, query) {
+    var q = String(query || '').trim().toLowerCase();
+    var filtered = q
+      ? cats.filter(function (c) { return c.category.toLowerCase().indexOf(q) !== -1; })
+      : cats;
+    if (!filtered.length) {
+      return '<div class="cat-opt" style="color:var(--muted);cursor:default">ไม่พบหมวดหมู่ที่ค้นหา</div>';
+    }
+    return filtered.map(function (c) {
+      var act = c.category === selectedCat;
+      return '<button type="button" class="cat-opt' + (act ? ' active' : '') + '" data-cat-pick="' + esc(c.category) + '">' + esc(c.category) + '</button>';
+    }).join('');
+  }
+
   function render() {
     var isSplit = state.splits.length > 1;
-    var splitHtml = state.splits.map(function (sp, idx) {
-      var chipsHtml = '<div class="chip-group">' + cats.map(function (c) {
-        var act = c.category === sp.category;
-        return '<button type="button" class="chip' + (act ? ' active' : '') + '" data-sp-cat="' + idx + '" data-val="' + esc(c.category) + '">' + esc(c.category) + '</button>';
-      }).join('') + '</div>';
+    var pmInfo = PAYEE_MODES[state.payeeMode] || PAYEE_MODES.SELF;
 
+    var splitHtml = state.splits.map(function (sp, idx) {
       return '<div class="split-card" data-sp="' + idx + '">' +
         (isSplit
           ? '<div class="split-head"><strong>รายการที่ ' + (idx + 1) + '</strong>' +
               '<button type="button" class="btn sm danger" data-del-sp="' + idx + '">ลบ</button></div>'
           : '') +
-        '<label class="f">' + (isSplit ? 'จำนวนเงิน (บาท)' : 'ยอดเงินทั้งหมด (บาท)') + '</label>' +
-        '<input type="number" step="0.01" inputmode="decimal" class="' + (isSplit ? '' : 'amount-hero') + '" data-sf="amount" value="' + esc(sp.amount) + '" placeholder="0.00">' +
-        '<label class="f">เลือกหมวดหมู่</label>' +
-        chipsHtml +
+        '<label class="f">ชื่อสินค้า / รายการ</label>' +
+        '<input type="text" data-sf="description" value="' + esc(sp.description) + '" placeholder="เช่น กล่องพัสดุ / ผ้าคอตตอน / ค่าส่ง">' +
         '<div class="grid2">' +
-          '<div><label class="f">รายละเอียดสั้นๆ</label><input type="text" data-sf="description" value="' + esc(sp.description) + '" placeholder="เช่น ค่าของ / Shopee"></div>' +
-          '<div><label class="f">ภาษีซื้อ (VAT)</label><select data-sf="vatMode">' +
+          '<div><label class="f">จำนวน</label><input type="number" step="any" inputmode="decimal" data-sf="qty" value="' + esc(sp.qty) + '" placeholder="1"></div>' +
+          '<div><label class="f">หน่วย (พิมพ์ระบุเอง)</label><input type="text" data-sf="unit" value="' + esc(sp.unit) + '" placeholder="ชิ้น / แพ็ก / กล่อง"></div>' +
+        '</div>' +
+        '<label class="f">หมวดหมู่ (พิมพ์ค้นหาหรือแตะเลือก)</label>' +
+        '<div class="cat-filter-wrap">' +
+          '<input type="text" class="cat-filter-input" data-cat-q="' + idx + '" value="' + esc(sp.category) + '" placeholder="พิมพ์กรองหมวดหมู่..." autocomplete="off">' +
+          '<div class="cat-dropdown" data-cat-dd="' + idx + '" hidden>' + renderCatOptionsHtml(sp.category, '') + '</div>' +
+        '</div>' +
+        '<label class="f">' + (isSplit ? 'ยอดเงินรวมรายการนี้ (บาท)' : 'ยอดเงินรวมทั้งหมด (บาท)') + '</label>' +
+        '<input type="number" step="0.01" inputmode="decimal" class="' + (isSplit ? '' : 'amount-hero') + '" data-sf="amount" value="' + esc(sp.amount) + '" placeholder="0.00">' +
+        '<details class="opt-box" style="margin:8px 0 0">' +
+          '<summary>ภาษีซื้อ (VAT): ' + (sp.vatMode === 'INCL' ? 'รวม VAT 7%' : (sp.vatMode === 'EXCL' ? 'ยังไม่รวม VAT (+7%)' : 'ไม่มี VAT')) + '</summary>' +
+          '<select data-sf="vatMode" style="margin-top:6px">' +
             '<option value="NONE"' + (sp.vatMode === 'NONE' ? ' selected' : '') + '>ไม่มี VAT</option>' +
             '<option value="INCL"' + (sp.vatMode === 'INCL' ? ' selected' : '') + '>รวม VAT 7%</option>' +
             '<option value="EXCL"' + (sp.vatMode === 'EXCL' ? ' selected' : '') + '>ยังไม่รวม VAT</option>' +
-          '</select></div>' +
-        '</div>' +
+          '</select>' +
+        '</details>' +
       '</div>';
     }).join('');
 
@@ -108,12 +146,13 @@ window.TLPages.expense = async function (container, params) {
       '<div class="card">' +
         '<h2>🌸 บันทึกรายจ่าย' + (isSplit ? ' <span class="badge ok">แตกยอด ' + state.splits.length + ' รายการ</span>' : '') + '</h2>' +
 
-        '<label class="f">ผู้รับเงิน / การจ่าย</label>' +
+        '<label class="f">สถานะการจ่าย</label>' +
         '<div class="seg" id="exp-payee-seg">' +
-          '<button type="button" class="' + (state.payeeMode === 'SELF' ? 'active' : '') + '" data-pmode="SELF">ฉันสำรองจ่าย</button>' +
-          '<button type="button" class="' + (state.payeeMode === 'VENDOR' ? 'active' : '') + '" data-pmode="VENDOR">โอนร้านค้า</button>' +
-          '<button type="button" class="' + (state.payeeMode === 'OWNER_PAID' ? 'active' : '') + '" data-pmode="OWNER_PAID">จ่ายแล้ว</button>' +
+          Object.keys(PAYEE_MODES).map(function (k) {
+            return '<button type="button" class="' + (state.payeeMode === k ? 'active' : '') + '" data-pmode="' + k + '">' + esc(PAYEE_MODES[k].label) + '</button>';
+          }).join('') +
         '</div>' +
+        '<div class="payee-hint ' + pmInfo.cls + '">' + esc(pmInfo.desc) + '</div>' +
         (state.payeeMode !== 'SELF'
           ? '<input type="text" id="exp-payee-name" value="' + esc(state.payeeName) + '" placeholder="ชื่อร้านค้า / ผู้รับเงิน (เช่น Shopee / ร้านวัสดุ)" style="margin-bottom:8px">'
           : '') +
@@ -204,6 +243,10 @@ window.TLPages.expense = async function (container, params) {
     });
   }
 
+  function closeAllCatDropdowns() {
+    container.querySelectorAll('.cat-dropdown').forEach(function (dd) { dd.hidden = true; });
+  }
+
   function bindEvents() {
     bindDraftEvents();
 
@@ -240,15 +283,55 @@ window.TLPages.expense = async function (container, params) {
     var delSlip = document.getElementById('del-slip');
     if (delSlip) delSlip.onclick = function () { state.slipImage = ''; render(); };
 
-    container.querySelectorAll('[data-sp-cat]').forEach(function (b) {
-      b.onclick = function () {
-        var idx = Number(b.dataset.spCat);
-        state.splits[idx].category = b.dataset.val;
-        var card = b.closest('.split-card');
-        card.querySelectorAll('[data-sp-cat]').forEach(function (c) { c.classList.remove('active'); });
-        b.classList.add('active');
+    // Filterable category combobox per line
+    container.querySelectorAll('.cat-filter-wrap').forEach(function (wrap) {
+      var inp = wrap.querySelector('[data-cat-q]');
+      var dd = wrap.querySelector('[data-cat-dd]');
+      var idx = Number(inp.dataset.catQ);
+
+      function bindDropOptions() {
+        dd.querySelectorAll('[data-cat-pick]').forEach(function (opt) {
+          opt.onclick = function (e) {
+            e.stopPropagation();
+            var chosen = opt.dataset.catPick;
+            state.splits[idx].category = chosen;
+            inp.value = chosen;
+            dd.hidden = true;
+          };
+        });
+      }
+
+      inp.onfocus = function () {
+        closeAllCatDropdowns();
+        dd.innerHTML = renderCatOptionsHtml(state.splits[idx].category, '');
+        bindDropOptions();
+        dd.hidden = false;
+        inp.select();
+      };
+      inp.onclick = function (e) {
+        e.stopPropagation();
+        if (dd.hidden) inp.onfocus();
+      };
+      inp.oninput = function () {
+        dd.innerHTML = renderCatOptionsHtml(state.splits[idx].category, inp.value);
+        bindDropOptions();
+        dd.hidden = false;
       };
     });
+
+    if (container._catDocListener) {
+      document.removeEventListener('click', container._catDocListener);
+    }
+    container._catDocListener = function (e) {
+      if (!e.target.closest('.cat-filter-wrap')) {
+        closeAllCatDropdowns();
+        container.querySelectorAll('[data-cat-q]').forEach(function (inp) {
+          var idx = Number(inp.dataset.catQ);
+          if (state.splits[idx]) inp.value = state.splits[idx].category;
+        });
+      }
+    };
+    document.addEventListener('click', container._catDocListener);
 
     container.querySelectorAll('.split-card').forEach(function (card) {
       var idx = Number(card.dataset.sp);
@@ -266,7 +349,7 @@ window.TLPages.expense = async function (container, params) {
     });
 
     document.getElementById('btn-add-split').onclick = function () {
-      state.splits.push({ category: cats[0].category, description: '', amount: '', vatMode: 'NONE' });
+      state.splits.push({ category: cats[0].category, description: '', qty: '1', unit: '', amount: '', vatMode: 'NONE' });
       render();
     };
     document.getElementById('exp-slip-compare').oninput = function () {
@@ -289,6 +372,8 @@ window.TLPages.expense = async function (container, params) {
         return {
           category: sp.category,
           description: sp.description,
+          qty: sp.qty,
+          unit: sp.unit,
           amount: (finalAmt / 100).toFixed(2),
           vatAmount: (vatSt / 100).toFixed(2)
         };
@@ -314,7 +399,7 @@ window.TLPages.expense = async function (container, params) {
         state.billImages = [];
         state.slipImage = '';
         state.slipCompareTotal = '';
-        state.splits = [{ category: cats[0].category, description: '', amount: '', vatMode: 'NONE' }];
+        state.splits = [{ category: cats[0].category, description: '', qty: '1', unit: '', amount: '', vatMode: 'NONE' }];
         render();
         TLApi.call('getDrafts', {}).then(function (dr2) {
           drafts = dr2.drafts || [];
@@ -329,7 +414,6 @@ window.TLPages.expense = async function (container, params) {
     };
   }
 
-  // ถ้าเปิดจากปุ่มร่างในแชต ให้โหลดร่างก่อน; ถ้าเปิดหน้าจ่ายปกติ แสดงฟอร์มทันทีแล้วโหลดร่างเบื้องหลัง
   if (draftId) {
     try {
       var dr = await TLApi.call('getDrafts', {});

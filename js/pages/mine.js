@@ -40,10 +40,11 @@ window.TLPages.mine = async function (container) {
       ? visibleList.map(function (t) {
           var isCancel = t.status === 'ยกเลิก';
           var badgeCls = isCancel ? 'danger' : (t.status === 'รอโอน' ? 'warn' : (t.status === 'ร่าง' ? '' : 'ok'));
+          var qtyBadge = (t.qty || t.unit) ? ' <span class="badge">' + esc([t.qty, t.unit].filter(Boolean).join(' ')) + '</span>' : '';
           return '<div class="list-item" style="flex-direction:column">' +
             '<div style="width:100%;display:flex;justify-content:space-between;align-items:flex-start">' +
               '<div>' +
-                '<b>' + esc(t.description) + '</b> ' +
+                '<b>' + esc(t.description) + '</b>' + qtyBadge + ' ' +
                 '<span class="badge ' + badgeCls + '">' + esc(t.status) + '</span>' +
                 (t.splitGroupId ? ' <span class="badge">แตกยอด</span>' : '') +
                 '<div class="hint">' + esc(t.type) + ' · ' + esc(t.category) + ' · บิล ' + TLUtils.thaiDate(t.billDate) +

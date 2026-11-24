@@ -57,11 +57,12 @@ window.TLPages.pending = async function (container) {
       ? data.groups.map(function (g, gIdx) {
           var rowsHtml = g.items.map(function (it) {
             var checked = !!selectedIds[it.txnId];
+            var qtyBadge = (it.qty || it.unit) ? ' <span class="badge">' + esc([it.qty, it.unit].filter(Boolean).join(' ')) + '</span>' : '';
             return '<div class="list-item">' +
               '<label style="display:flex;gap:10px;align-items:flex-start;flex:1;cursor:pointer">' +
                 '<input type="checkbox" data-chk-txn="' + esc(it.txnId) + '"' + (checked ? ' checked' : '') + ' style="width:22px;height:22px;margin-top:2px">' +
                 '<div>' +
-                  '<b>' + esc(it.description) + '</b>' +
+                  '<b>' + esc(it.description) + '</b>' + qtyBadge +
                   '<div class="hint">' + esc(it.category) + ' · บิล ' + TLUtils.thaiDate(it.billDate) + ' <span class="badge ' + (it.ageDays >= 3 ? 'warn' : '') + '">ค้าง ' + it.ageDays + ' วัน</span></div>' +
                   '<div class="btns" style="margin:4px 0 0">' +
                     (it.billImageIds || []).map(function (fid, idx) {
