@@ -83,25 +83,14 @@ window.TLPages.expense = async function (container, params) {
     '</div>';
   }
 
-  function renderCatOptionsHtml(selectedCat, query) {
-    var q = String(query || '').trim().toLowerCase();
-    var filtered = q
-      ? cats.filter(function (c) { return c.category.toLowerCase().indexOf(q) !== -1; })
-      : cats;
-    if (!filtered.length) {
-      return '<div class="cat-opt" style="color:var(--muted);cursor:default">ไม่พบหมวดหมู่ที่ค้นหา</div>';
-    }
-    return filtered.map(function (c) {
-      var act = c.category === selectedCat;
-      return '<button type="button" class="cat-opt' + (act ? ' active' : '') + '" data-cat-pick="' + esc(c.category) + '">' + esc(c.category) + '</button>';
-    }).join('');
-  }
-
   function render() {
     var isSplit = state.splits.length > 1;
     var pmInfo = PAYEE_MODES[state.payeeMode] || PAYEE_MODES.SELF;
 
     var splitHtml = state.splits.map(function (sp, idx) {
+      var catOpts = cats.map(function (c) {
+        return '<option value="' + esc(c.category) + '"' + (c.category === sp.category ? ' selected' : '') + '>' + esc(c.category) + '</option>';
+      }).join('');
       return '<div class="split-card" data-sp="' + idx + '">' +
         (isSplit
           ? '<div class="split-head"><strong>รายการที่ ' + (idx + 1) + '</strong>' +
@@ -113,11 +102,8 @@ window.TLPages.expense = async function (container, params) {
           '<div><label class="f">จำนวน</label><input type="number" step="any" inputmode="decimal" data-sf="qty" value="' + esc(sp.qty) + '" placeholder="1"></div>' +
           '<div><label class="f">หน่วย (พิมพ์ระบุเอง)</label><input type="text" data-sf="unit" value="' + esc(sp.unit) + '" placeholder="ชิ้น / แพ็ก / กล่อง"></div>' +
         '</div>' +
-        '<label class="f">หมวดหมู่ (พิมพ์ค้นหาหรือแตะเลือก)</label>' +
-        '<div class="cat-filter-wrap">' +
-          '<input type="text" class="cat-filter-input" data-cat-q="' + idx + '" value="' + esc(sp.category) + '" placeholder="พิมพ์กรองหมวดหมู่..." autocomplete="off">' +
-          '<div class="cat-dropdown" data-cat-dd="' + idx + '" hidden>' + renderCatOptionsHtml(sp.category, '') + '</div>' +
-        '</div>' +
+        '<label class="f">หมวดหมู่</label>' +
+        '<select data-sf="category">' + catOpts + '</select>' +
         '<label class="f">' + (isSplit ? 'ยอดเงินรวมรายการนี้ (บาท)' : 'ยอดเงินรวมทั้งหมด (บาท)') + '</label>' +
         '<input type="number" step="0.01" inputmode="decimal" class="' + (isSplit ? '' : 'amount-hero') + '" data-sf="amount" value="' + esc(sp.amount) + '" placeholder="0.00">' +
         '<details class="opt-box" style="margin:8px 0 0">' +
@@ -243,10 +229,6 @@ window.TLPages.expense = async function (container, params) {
     });
   }
 
-  function closeAllCatDropdowns() {
-    container.querySelectorAll('.cat-dropdown').forEach(function (dd) { dd.hidden = true; });
-  }
-
   function bindEvents() {
     bindDraftEvents();
 
@@ -282,56 +264,6 @@ window.TLPages.expense = async function (container, params) {
     };
     var delSlip = document.getElementById('del-slip');
     if (delSlip) delSlip.onclick = function () { state.slipImage = ''; render(); };
-
-    // Filterable category combobox per line
-    container.querySelectorAll('.cat-filter-wrap').forEach(function (wrap) {
-      var inp = wrap.querySelector('[data-cat-q]');
-      var dd = wrap.querySelector('[data-cat-dd]');
-      var idx = Number(inp.dataset.catQ);
-
-      function bindDropOptions() {
-        dd.querySelectorAll('[data-cat-pick]').forEach(function (opt) {
-          opt.onclick = function (e) {
-            e.stopPropagation();
-            var chosen = opt.dataset.catPick;
-            state.splits[idx].category = chosen;
-            inp.value = chosen;
-            dd.hidden = true;
-          };
-        });
-      }
-
-      inp.onfocus = function () {
-        closeAllCatDropdowns();
-        dd.innerHTML = renderCatOptionsHtml(state.splits[idx].category, '');
-        bindDropOptions();
-        dd.hidden = false;
-        inp.select();
-      };
-      inp.onclick = function (e) {
-        e.stopPropagation();
-        if (dd.hidden) inp.onfocus();
-      };
-      inp.oninput = function () {
-        dd.innerHTML = renderCatOptionsHtml(state.splits[idx].category, inp.value);
-        bindDropOptions();
-        dd.hidden = false;
-      };
-    });
-
-    if (container._catDocListener) {
-      document.removeEventListener('click', container._catDocListener);
-    }
-    container._catDocListener = function (e) {
-      if (!e.target.closest('.cat-filter-wrap')) {
-        closeAllCatDropdowns();
-        container.querySelectorAll('[data-cat-q]').forEach(function (inp) {
-          var idx = Number(inp.dataset.catQ);
-          if (state.splits[idx]) inp.value = state.splits[idx].category;
-        });
-      }
-    };
-    document.addEventListener('click', container._catDocListener);
 
     container.querySelectorAll('.split-card').forEach(function (card) {
       var idx = Number(card.dataset.sp);
