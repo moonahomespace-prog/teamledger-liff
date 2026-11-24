@@ -13,6 +13,7 @@ window.TLApi = (function () {
   var CACHE_PREFIX = 'tl_tab_v1_';
   var MUTATING_ACTIONS = {
     createTransaction: true,
+    updateTransaction: true,
     cancelTransaction: true,
     createPaymentBatch: true,
     cancelPaymentBatch: true,

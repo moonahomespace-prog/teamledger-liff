@@ -78,12 +78,77 @@ window.TLPages.settings = async function (container) {
       '</div>' +
     '</div>' +
     '<div class="card">' +
+      '<h3>🗂️ จัดการหมวดหมู่รายจ่าย / รายรับ</h3>' +
+      '<p class="hint">ปรับชื่อ เพิ่ม หรือลบหมวดหมู่ที่ทีมงานเลือกใช้ (แก้ไขแล้วกดบันทึก)</p>' +
+      '<div id="cat-mgr-list"></div>' +
+      '<div class="grid2" style="margin-top:8px">' +
+        '<div style="display:flex;gap:6px"><input type="text" id="new-cat-exp" placeholder="เพิ่มหมวดรายจ่าย..."><button type="button" class="btn sm outline" id="btn-add-cat-exp">+ จ่าย</button></div>' +
+        '<div style="display:flex;gap:6px"><input type="text" id="new-cat-inc" placeholder="เพิ่มหมวดรายรับ..."><button type="button" class="btn sm sky" id="btn-add-cat-inc">+ รับ</button></div>' +
+      '</div>' +
+      '<div class="btns" style="margin-top:10px">' +
+        '<button type="button" class="btn pri full" id="btn-save-cats">💾 บันทึกหมวดหมู่</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
       '<h3>🛡️ ตรวจสอบความปลอดภัย & ชีต</h3>' +
       '<div class="btns">' +
         '<button type="button" class="btn outline" id="btn-healthcheck">🔒 ตรวจการแชร์ Drive (healthCheck)</button>' +
         '<button type="button" class="btn outline" id="btn-refresh-dash">📊 อัปเดต Dashboard ในชีต</button>' +
       '</div>' +
     '</div>';
+
+  var catList = (TLApi.state.categories || []).map(function (c) {
+    return { type: c.type === 'รับ' ? 'รับ' : 'จ่าย', category: String(c.category || ''), active: true };
+  });
+
+  function renderCats() {
+    var box = document.getElementById('cat-mgr-list');
+    if (!box) return;
+    box.innerHTML = catList.map(function (c, i) {
+      return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">' +
+        '<span class="badge ' + (c.type === 'รับ' ? 'ok' : '') + '" style="min-width:44px;text-align:center">' + esc(c.type) + '</span>' +
+        '<input type="text" data-cat-edit="' + i + '" value="' + esc(c.category) + '" style="flex:1">' +
+        '<button type="button" class="btn sm danger" data-cat-del="' + i + '">ลบ</button>' +
+      '</div>';
+    }).join('') || '<p class="hint">ยังไม่มีหมวดหมู่</p>';
+
+    box.querySelectorAll('[data-cat-edit]').forEach(function (inp) {
+      inp.oninput = function () { catList[Number(inp.dataset.catEdit)].category = inp.value; };
+    });
+    box.querySelectorAll('[data-cat-del]').forEach(function (b) {
+      b.onclick = function () { catList.splice(Number(b.dataset.catDel), 1); renderCats(); };
+    });
+  }
+  renderCats();
+
+  function addCat(type, inpId) {
+    var el = document.getElementById(inpId);
+    var name = el ? el.value.trim() : '';
+    if (!name) return TLUtils.showToast('กรุณากรอกชื่อหมวดหมู่', 'err');
+    catList.push({ type: type, category: name, active: true });
+    el.value = '';
+    renderCats();
+  }
+  document.getElementById('btn-add-cat-exp').onclick = function () { addCat('จ่าย', 'new-cat-exp'); };
+  document.getElementById('btn-add-cat-inc').onclick = function () { addCat('รับ', 'new-cat-inc'); };
+
+  document.getElementById('btn-save-cats').onclick = async function () {
+    var btn = this;
+    var cleaned = catList
+      .map(function (c) { return { type: c.type, category: c.category.trim(), active: true }; })
+      .filter(function (c) { return !!c.category; });
+    if (!cleaned.length) return TLUtils.showToast('ต้องมีหมวดหมู่อย่างน้อย 1 รายการ', 'err');
+    btn.disabled = true;
+    try {
+      await TLApi.call('saveCategories', { categories: cleaned });
+      catList = cleaned;
+      TLApi.state.categories = cleaned.map(function (c) { return { type: c.type, category: c.category }; });
+      if (window.TLRefreshBootCache) window.TLRefreshBootCache();
+      renderCats();
+      TLUtils.showToast('บันทึกหมวดหมู่เรียบร้อย (' + cleaned.length + ' หมวด)', 'ok');
+    } catch (e) { TLUtils.showToast(e.message, 'err'); }
+    btn.disabled = false;
+  };
 
   document.getElementById('btn-save-settings').onclick = async function () {
     this.disabled = true;

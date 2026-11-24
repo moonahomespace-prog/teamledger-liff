@@ -69,6 +69,7 @@ window.TLPages.pending = async function (container) {
                       return '<button type="button" class="btn sm outline" data-img="' + esc(fid) + '">🖼️ บิล #' + (idx + 1) + '</button>';
                     }).join('') +
                     (it.slipImageId ? '<button type="button" class="btn sm outline" data-img="' + esc(it.slipImageId) + '">🧾 สลิป</button>' : '') +
+                    '<button type="button" class="btn sm outline" data-edit-txn="' + esc(it.txnId) + '">✏️ แก้ไข</button>' +
                     '<button type="button" class="btn sm danger" data-cancel-txn="' + esc(it.txnId) + '">✕ ยกเลิก</button>' +
                   '</div>' +
                 '</div>' +
@@ -152,6 +153,16 @@ window.TLPages.pending = async function (container) {
     });
     container.querySelectorAll('[data-img]').forEach(function (b) {
       b.onclick = function () { TLApi.viewPrivateImage(b.dataset.img, 'หลักฐาน / สลิป'); };
+    });
+    container.querySelectorAll('[data-edit-txn]').forEach(function (b) {
+      b.onclick = function () {
+        var tid = b.dataset.editTxn;
+        var found = null;
+        (data.groups || []).forEach(function (g) {
+          (g.items || []).forEach(function (it) { if (it.txnId === tid) found = it; });
+        });
+        if (found) TLUtils.openEditTxnModal(found, function () { loadData(true); });
+      };
     });
     container.querySelectorAll('[data-cancel-txn]').forEach(function (b) {
       b.onclick = async function () {

@@ -62,6 +62,8 @@ window.TLPages.mine = async function (container) {
                 return '<button type="button" class="btn sm outline" data-img="' + esc(fid) + '">🖼️ บิล #' + (idx + 1) + '</button>';
               }).join('') +
               (t.slipImageId ? '<button type="button" class="btn sm outline" data-img="' + esc(t.slipImageId) + '">🧾 สลิป</button>' : '') +
+              (!isCancel && t.status !== 'โอนแล้ว' ? '<button type="button" class="btn sm outline" data-edit-txn="' + esc(t.txnId) + '">✏️ แก้ไข</button>' : '') +
+              (t.type === 'จ่าย' ? '<button type="button" class="btn sm outline" data-dup-txn="' + esc(t.txnId) + '">⧉ ทำซ้ำ</button>' : '') +
               (!isCancel && t.status !== 'โอนแล้ว' ? '<button type="button" class="btn sm danger" data-cancel-txn="' + esc(t.txnId) + '">✕ ยกเลิก</button>' : '') +
             '</div>' +
           '</div>';
@@ -90,6 +92,40 @@ window.TLPages.mine = async function (container) {
     document.getElementById('mine-hide-cancel').onchange = function () { hideCancelled = this.checked; render(); };
     container.querySelectorAll('[data-img]').forEach(function (b) {
       b.onclick = function () { TLApi.viewPrivateImage(b.dataset.img, 'รูปหลักฐาน'); };
+    });
+    container.querySelectorAll('[data-edit-txn]').forEach(function (b) {
+      b.onclick = function () {
+        var tid = b.dataset.editTxn;
+        var found = visibleList.find(function (x) { return x.txnId === tid; });
+        if (found) TLUtils.openEditTxnModal(found, function () { loadData(true); });
+      };
+    });
+    container.querySelectorAll('[data-dup-txn]').forEach(function (b) {
+      b.onclick = function () {
+        var tid = b.dataset.dupTxn;
+        var found = visibleList.find(function (x) { return x.txnId === tid; });
+        if (!found) return;
+        var groupItems = found.splitGroupId
+          ? visibleList.filter(function (x) { return x.splitGroupId === found.splitGroupId && x.status !== 'ยกเลิก'; })
+          : [found];
+        if (!groupItems.length) groupItems = [found];
+        var payeeMode = found.status === 'จ่ายแล้ว' ? 'OWNER_PAID' : (found.payee && found.payee === String(found.createdBy || '').split(' (')[0] ? 'SELF' : 'VENDOR');
+        var prefill = {
+          payeeMode: payeeMode,
+          payeeName: payeeMode === 'SELF' ? '' : (found.payee || ''),
+          splits: groupItems.map(function (it) {
+            return {
+              category: it.category || '',
+              description: it.description || '',
+              qty: it.qty || '1',
+              unit: it.unit || '',
+              amount: Number(it.amount || 0).toFixed(2),
+              vatMode: it.vatAmount > 0 ? 'INCL' : 'NONE'
+            };
+          })
+        };
+        if (window.TLNavigate) window.TLNavigate('expense', { prefill: prefill });
+      };
     });
     container.querySelectorAll('[data-cancel-txn]').forEach(function (b) {
       b.onclick = async function () {

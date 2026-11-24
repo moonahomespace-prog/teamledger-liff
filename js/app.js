@@ -78,6 +78,13 @@
     var handler = window.TLPages[page] || window.TLPages.expense;
     handler(container, extraParams || {});
   }
+  window.TLNavigate = navigate;
+  window.TLRefreshBootCache = function () {
+    var sub = getSubFromToken(TLApi.state.idToken);
+    if (sub && TLApi.state.user) {
+      saveBootCache(sub, TLApi.state.user, TLApi.state.categories, TLApi.state.invoiceSettings);
+    }
+  };
 
   function renderNav(user) {
     var isOwner = user.role === 'OWNER';

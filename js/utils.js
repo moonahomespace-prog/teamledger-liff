@@ -201,6 +201,126 @@ window.TLUtils = (function () {
     });
   }
 
+  var RECENT_UNITS_KEY = 'tl_recent_units_v1';
+  var DEFAULT_UNITS = ['ชิ้น', 'อัน', 'คู่', 'ชุด', 'แพ็ก', 'ห่อ', 'กล่อง', 'ลัง', 'ม้วน', 'ผืน', 'หลา', 'เมตร', 'ขวด', 'แกลลอน', 'กิโลกรัม', 'กรัม', 'ใบ', 'ครั้ง', 'เที่ยว', 'เดือน'];
+
+  function getUnitSuggestions() {
+    var recent = [];
+    try {
+      var parsed = JSON.parse(localStorage.getItem(RECENT_UNITS_KEY) || '[]');
+      if (Array.isArray(parsed)) recent = parsed;
+    } catch (e) {}
+    var seen = {};
+    var out = [];
+    recent.concat(DEFAULT_UNITS).forEach(function (u) {
+      var s = String(u || '').trim();
+      if (s && !seen[s]) { seen[s] = true; out.push(s); }
+    });
+    return out;
+  }
+
+  function saveRecentUnit(unitStr) {
+    var s = String(unitStr || '').trim();
+    if (!s) return;
+    try {
+      var prev = JSON.parse(localStorage.getItem(RECENT_UNITS_KEY) || '[]');
+      if (!Array.isArray(prev)) prev = [];
+      var next = [s].concat(prev.filter(function (x) { return String(x).trim() !== s; })).slice(0, 12);
+      localStorage.setItem(RECENT_UNITS_KEY, JSON.stringify(next));
+    } catch (e) {}
+  }
+
+  function buildUnitDatalistHtml(id) {
+    return '<datalist id="' + esc(id || 'tl-unit-list') + '">' +
+      getUnitSuggestions().map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') +
+    '</datalist>';
+  }
+
+  function openEditTxnModal(txn, onSaved) {
+    if (!txn) return;
+    var cats = (window.TLApi && TLApi.state && TLApi.state.categories ? TLApi.state.categories : [])
+      .filter(function (c) { return c.type === (txn.type === 'รับ' ? 'รับ' : 'จ่าย'); })
+      .map(function (c) { return c.category; });
+    if (txn.category && cats.indexOf(txn.category) === -1) cats.unshift(txn.category);
+    if (!cats.length) cats = ['อื่นๆ'];
+
+    var isExpense = txn.type !== 'รับ';
+    var canChangePayMode = isExpense && txn.status !== 'ร่าง';
+    var curPayMode = txn.status === 'จ่ายแล้ว' ? 'OWNER_PAID' : 'SELF';
+
+    var html =
+      '<div class="hint" style="margin-bottom:8px">รหัส: <b>' + esc(txn.txnId) + '</b> · ประเภท: ' + esc(txn.type) + '</div>' +
+      '<label class="f">วันที่ในบิล</label>' +
+      '<input type="date" id="ed-bill-date" value="' + esc(txn.billDate || todayISO()) + '">' +
+      '<label class="f">หมวดหมู่</label>' +
+      '<select id="ed-cat">' + cats.map(function (c) {
+        return '<option value="' + esc(c) + '"' + (c === txn.category ? ' selected' : '') + '>' + esc(c) + '</option>';
+      }).join('') + '</select>' +
+      '<label class="f">ชื่อสินค้า / รายละเอียด</label>' +
+      '<input type="text" id="ed-desc" value="' + esc(txn.description || '') + '">' +
+      '<div class="grid2">' +
+        '<div><label class="f">จำนวน</label><input type="number" step="any" inputmode="decimal" id="ed-qty" value="' + esc(txn.qty || '') + '"></div>' +
+        '<div><label class="f">หน่วย</label><input type="text" list="tl-edit-unit-list" id="ed-unit" value="' + esc(txn.unit || '') + '" placeholder="ชิ้น / แพ็ก">' + buildUnitDatalistHtml('tl-edit-unit-list') + '</div>' +
+      '</div>' +
+      '<div class="grid2">' +
+        '<div><label class="f">ยอดเงินรวม (บาท)</label><input type="number" step="0.01" inputmode="decimal" id="ed-amt" value="' + Number(txn.amount || 0).toFixed(2) + '"></div>' +
+        '<div><label class="f">คำนวณ VAT ใหม่</label><select id="ed-vat-mode">' +
+          '<option value="KEEP">คงยอด VAT เดิม (' + Number(txn.vatAmount || 0).toFixed(2) + ' บ.)</option>' +
+          '<option value="NONE">ไม่มี VAT (0.00 บ.)</option>' +
+          '<option value="INCL">รวม VAT 7% แล้ว</option>' +
+        '</select></div>' +
+      '</div>' +
+      '<label class="f">' + (isExpense ? 'ผู้รับเงิน / ร้านค้า' : 'รับจาก') + '</label>' +
+      '<input type="text" id="ed-payee" value="' + esc(txn.payee || '') + '">' +
+      (canChangePayMode
+        ? '<label class="f">สถานะการจ่าย</label><select id="ed-pmode">' +
+            '<option value="KEEP">คงสถานะเดิม (' + esc(txn.status) + ')</option>' +
+            '<option value="SELF"' + (curPayMode === 'SELF' ? ' selected' : '') + '>รอโอน (ฉันจ่าย / ร้านค้า)</option>' +
+            '<option value="OWNER_PAID"' + (curPayMode === 'OWNER_PAID' ? ' selected' : '') + '>จ่ายแล้ว (จบรายการ)</option>' +
+          '</select>'
+        : '') +
+      '<div class="btns" style="margin-top:14px">' +
+        '<button type="button" class="btn" style="flex:1" id="ed-cancel">ปิด</button>' +
+        '<button type="button" class="btn pri" style="flex:2" id="ed-save">💾 บันทึกการแก้ไข</button>' +
+      '</div>';
+
+    showModal('✏️ แก้ไขรายการ', html);
+    document.getElementById('ed-cancel').onclick = closeModal;
+    document.getElementById('ed-save').onclick = async function () {
+      var btn = this;
+      var amt = parseFloat(document.getElementById('ed-amt').value || '0');
+      if (isNaN(amt) || amt <= 0) return showToast('จำนวนเงินต้องมากกว่า 0', 'err');
+      var vatChoice = document.getElementById('ed-vat-mode').value;
+      var pmodeEl = document.getElementById('ed-pmode');
+      var payload = {
+        txnId: txn.txnId,
+        billDate: document.getElementById('ed-bill-date').value,
+        category: document.getElementById('ed-cat').value,
+        description: document.getElementById('ed-desc').value.trim(),
+        qty: document.getElementById('ed-qty').value.trim(),
+        unit: document.getElementById('ed-unit').value.trim(),
+        amount: amt.toFixed(2),
+        payee: document.getElementById('ed-payee').value.trim()
+      };
+      if (vatChoice !== 'KEEP') payload.vatMode = vatChoice;
+      if (pmodeEl && pmodeEl.value !== 'KEEP') payload.payeeMode = pmodeEl.value;
+
+      btn.disabled = true;
+      btn.textContent = 'กำลังบันทึก...';
+      try {
+        await window.TLApi.call('updateTransaction', payload);
+        if (payload.unit) saveRecentUnit(payload.unit);
+        closeModal();
+        showToast('บันทึกการแก้ไขแล้ว', 'ok');
+        if (typeof onSaved === 'function') onSaved();
+      } catch (e) {
+        showToast(e.message, 'err');
+        btn.disabled = false;
+        btn.textContent = '💾 บันทึกการแก้ไข';
+      }
+    };
+  }
+
   function printPagesHtml(pagesHtml, fontSizePt) {
     var root = document.getElementById('print-root');
     if (!root) {
@@ -225,6 +345,10 @@ window.TLUtils = (function () {
     showModal: showModal,
     closeModal: closeModal,
     promptCancelReason: promptCancelReason,
+    getUnitSuggestions: getUnitSuggestions,
+    saveRecentUnit: saveRecentUnit,
+    buildUnitDatalistHtml: buildUnitDatalistHtml,
+    openEditTxnModal: openEditTxnModal,
     compressImage: compressImage,
     base64ToBlob: base64ToBlob,
     downloadBase64File: downloadBase64File,

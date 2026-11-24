@@ -30,19 +30,33 @@ window.TLPages.expense = async function (container, params) {
     }
   };
 
+  var prefill = (params && params.prefill) || null;
   var state = {
     draftTxnId: draftId,
     existingBillImageId: '',
     billImages: [],
     slipImage: '',
-    billDate: TLUtils.todayISO(),
-    payeeMode: 'SELF',
-    payeeName: '',
-    slipCompareTotal: '',
-    splits: [
-      { category: cats[0].category, description: '', qty: '1', unit: '', amount: '', vatMode: 'NONE' }
-    ]
+    slipScanInfo: null,
+    billDate: (prefill && prefill.billDate) || TLUtils.todayISO(),
+    payeeMode: (prefill && prefill.payeeMode) || 'SELF',
+    payeeName: (prefill && prefill.payeeName) || '',
+    slipCompareTotal: (prefill && prefill.slipCompareTotal) || '',
+    splits: (prefill && Array.isArray(prefill.splits) && prefill.splits.length)
+      ? prefill.splits.map(function (sp) {
+          return {
+            category: sp.category || cats[0].category,
+            description: sp.description || '',
+            qty: sp.qty || '1',
+            unit: sp.unit || '',
+            amount: sp.amount || '',
+            vatMode: sp.vatMode || 'NONE'
+          };
+        })
+      : [{ category: cats[0].category, description: '', qty: '1', unit: '', amount: '', vatMode: 'NONE' }]
   };
+  if (prefill) {
+    setTimeout(function () { TLUtils.showToast('คัดลอกข้อมูลเดิมมาแล้ว — ตรวจยอดและแนบรูปใหม่ได้เลย', 'ok'); }, 60);
+  }
 
   var drafts = [];
 
@@ -88,8 +102,10 @@ window.TLPages.expense = async function (container, params) {
     var pmInfo = PAYEE_MODES[state.payeeMode] || PAYEE_MODES.SELF;
 
     var splitHtml = state.splits.map(function (sp, idx) {
-      var catOpts = cats.map(function (c) {
-        return '<option value="' + esc(c.category) + '"' + (c.category === sp.category ? ' selected' : '') + '>' + esc(c.category) + '</option>';
+      var catChoices = cats.map(function (c) { return c.category; });
+      if (sp.category && catChoices.indexOf(sp.category) === -1) catChoices.unshift(sp.category);
+      var catOpts = catChoices.map(function (cname) {
+        return '<option value="' + esc(cname) + '"' + (cname === sp.category ? ' selected' : '') + '>' + esc(cname) + '</option>';
       }).join('');
       return '<div class="split-card" data-sp="' + idx + '">' +
         (isSplit
@@ -100,7 +116,7 @@ window.TLPages.expense = async function (container, params) {
         '<input type="text" data-sf="description" value="' + esc(sp.description) + '" placeholder="เช่น กล่องพัสดุ / ผ้าคอตตอน / ค่าส่ง">' +
         '<div class="grid2">' +
           '<div><label class="f">จำนวน</label><input type="number" step="any" inputmode="decimal" data-sf="qty" value="' + esc(sp.qty) + '" placeholder="1"></div>' +
-          '<div><label class="f">หน่วย (พิมพ์ระบุเอง)</label><input type="text" data-sf="unit" value="' + esc(sp.unit) + '" placeholder="ชิ้น / แพ็ก / กล่อง"></div>' +
+          '<div><label class="f">หน่วย (เลือกหรือพิมพ์)</label><input type="text" list="tl-unit-list" data-sf="unit" value="' + esc(sp.unit) + '" placeholder="ชิ้น / แพ็ก / กล่อง"></div>' +
         '</div>' +
         '<label class="f">หมวดหมู่</label>' +
         '<select data-sf="category">' + catOpts + '</select>' +
@@ -116,6 +132,27 @@ window.TLPages.expense = async function (container, params) {
         '</details>' +
       '</div>';
     }).join('');
+
+    var scanBanner = '';
+    if (state.slipScanInfo) {
+      var sc = state.slipScanInfo;
+      if (sc.statusText) {
+        scanBanner = '<div class="hint" id="exp-scan-progress" style="margin:6px 0">' + esc(sc.statusText) + '</div>';
+      } else if (sc.amount || sc.bankName || sc.billDate) {
+        scanBanner = '<div class="ok-box" style="margin:8px 0">' +
+          (sc.amount ? '✨ อ่านยอดเงินได้ประมาณ <b>' + esc(sc.amount) + '</b> บ. ' : '') +
+          (sc.bankName ? '· ' + esc(sc.bankName) + ' ' : '') +
+          (sc.billDate ? '· วันที่ ' + TLUtils.thaiDate(sc.billDate) + ' ' : '') +
+          '<div class="btns" style="margin:6px 0 0">' +
+            (sc.amount ? '<button type="button" class="btn sm sky" id="btn-exp-use-amt">ใช้ยอด ' + esc(sc.amount) + '</button>' : '') +
+            (sc.billDate ? '<button type="button" class="btn sm outline" id="btn-exp-use-date">ใช้วันที่นี้</button>' : '') +
+          '</div>' +
+          '<div class="hint">(ระบบฟรี 0 บ. — โปรดตรวจความถูกต้องก่อนบันทึก)</div>' +
+        '</div>';
+      } else if (sc.checked) {
+        scanBanner = '<div class="warn-box" style="margin:8px 0">ไม่พบตัวเลขชัดเจนจากภาพ กรุณากรอกยอดเงินด้วยตัวเอง</div>';
+      }
+    }
 
     var sum = calcSummary();
     var slipSt = TLInvoiceCore.parseFixed(state.slipCompareTotal, 2);
@@ -144,6 +181,7 @@ window.TLPages.expense = async function (container, params) {
           : '') +
 
         '<div id="exp-splits">' + splitHtml + '</div>' +
+        TLUtils.buildUnitDatalistHtml('tl-unit-list') +
         '<button type="button" class="btn outline full" id="btn-add-split" style="margin-bottom:10px">+ แตกยอดเพิ่ม (1 สลิปหลายรายการ)</button>' +
 
         '<div class="grid2">' +
@@ -171,8 +209,10 @@ window.TLPages.expense = async function (container, params) {
                 return '<div class="thumb-item"><img src="' + src + '"><button type="button" class="thumb-del" data-del-bill="' + i + '">✕</button></div>';
               }).join('') +
               (state.slipImage ? '<div class="thumb-item" style="border-color:var(--sky)"><img src="' + state.slipImage + '"><button type="button" class="thumb-del" id="del-slip">✕</button></div>' : '') +
-            '</div>'
+            '</div>' +
+            '<div class="btns" style="margin-top:6px"><button type="button" class="btn sm sky full" id="btn-exp-scan-slip">🔍 อ่านยอดเงินจากสลิป / บิล (ฟรี)</button></div>'
           : '') +
+        scanBanner +
 
         '<details class="opt-box"' + (isSplit || state.slipCompareTotal ? ' open' : '') + '>' +
           '<summary>⚙️ วันที่บิลย้อนหลัง & เทียบยอดสลิป (' + TLUtils.thaiDate(state.billDate) + ')</summary>' +
@@ -260,10 +300,70 @@ window.TLPages.expense = async function (container, params) {
       if (!f) return;
       TLUtils.showToast('กำลังย่อรูปสลิป...');
       state.slipImage = await TLUtils.compressImage(f, 1600, 0.75);
+      state.slipScanInfo = null;
+      if (window.TLSlipReader) {
+        try {
+          var qr = await TLSlipReader.readSlip(state.slipImage, { runOcr: false });
+          if (qr.amount || qr.bankName) {
+            state.slipScanInfo = qr;
+            if (qr.amount) {
+              if (state.splits.length === 1 && !state.splits[0].amount) state.splits[0].amount = qr.amount;
+              if (!state.slipCompareTotal) state.slipCompareTotal = qr.amount;
+            }
+          }
+        } catch (err) {}
+      }
       render();
     };
     var delSlip = document.getElementById('del-slip');
-    if (delSlip) delSlip.onclick = function () { state.slipImage = ''; render(); };
+    if (delSlip) delSlip.onclick = function () { state.slipImage = ''; state.slipScanInfo = null; render(); };
+
+    var scanBtn = document.getElementById('btn-exp-scan-slip');
+    if (scanBtn) {
+      scanBtn.onclick = async function () {
+        var targetImg = state.slipImage || state.billImages[0];
+        if (!window.TLSlipReader || !targetImg) return;
+        state.slipScanInfo = { statusText: 'กำลังโหลดตัวอ่านสลิป...' };
+        render();
+        try {
+          var res = await TLSlipReader.readSlip(targetImg, {
+            runOcr: true,
+            onProgress: function (msg) {
+              var pr = document.getElementById('exp-scan-progress');
+              if (pr && msg) pr.textContent = msg;
+            }
+          });
+          state.slipScanInfo = Object.assign({ checked: true }, res);
+          if (res.amount) {
+            if (state.splits.length === 1 && !state.splits[0].amount) state.splits[0].amount = res.amount;
+            if (!state.slipCompareTotal) state.slipCompareTotal = res.amount;
+          }
+        } catch (e) {
+          state.slipScanInfo = { checked: true };
+          TLUtils.showToast(e.message, 'err');
+        }
+        render();
+      };
+    }
+    var useAmtBtn = document.getElementById('btn-exp-use-amt');
+    if (useAmtBtn) {
+      useAmtBtn.onclick = function () {
+        var amt = state.slipScanInfo && state.slipScanInfo.amount;
+        if (!amt) return;
+        if (state.splits.length === 1) state.splits[0].amount = amt;
+        state.slipCompareTotal = amt;
+        render();
+      };
+    }
+    var useDateBtn = document.getElementById('btn-exp-use-date');
+    if (useDateBtn) {
+      useDateBtn.onclick = function () {
+        if (state.slipScanInfo && state.slipScanInfo.billDate) {
+          state.billDate = state.slipScanInfo.billDate;
+          render();
+        }
+      };
+    }
 
     container.querySelectorAll('.split-card').forEach(function (card) {
       var idx = Number(card.dataset.sp);
@@ -326,10 +426,12 @@ window.TLPages.expense = async function (container, params) {
           splits: payloadSplits
         });
         TLUtils.showToast('บันทึกรายจ่ายสำเร็จ (' + res.txnIds.length + ' รายการ)', 'ok');
+        payloadSplits.forEach(function (sp) { if (sp.unit) TLUtils.saveRecentUnit(sp.unit); });
         state.draftTxnId = '';
         state.existingBillImageId = '';
         state.billImages = [];
         state.slipImage = '';
+        state.slipScanInfo = null;
         state.slipCompareTotal = '';
         state.splits = [{ category: cats[0].category, description: '', qty: '1', unit: '', amount: '', vatMode: 'NONE' }];
         render();
